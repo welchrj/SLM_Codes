@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 # coding: utf-8
-
+""" 2D heat diffusion for simulating laser powder bed fusion. 
+This program uses an explicit scheme. """
 
 import numpy
 from matplotlib import pyplot
+import ipywidgets
 
 
 
@@ -37,11 +39,42 @@ def generation(P,d,t):
     g = P/(numpy.pi*d**2*t) #[W/mm^3]
     return g
 
-def laser_scan(X, Y, g, v, n, dt):
-    ds = v*dt*n
-    Z = numpy.sqrt((X)**2 + (Y-ds)**2) - .025
+def laser_scan(X, Y, v, g, n, dt):
+    """ 
+    Computes laser scan pattern along the y-direction
+    function is called within a for loop to and advanced based
+    on scan speed and total time passed.
+    
+    Parameters
+    ----------
+    X : numpy.ndarray (2D)
+    Y : numpy.ndarray (2D)
+    g : float
+        Volumetric heat generation
+    v : float
+        Scan speed
+    n : int
+        Iteration number
+    dt: float
+        Time step size
 
-def ftcs(X, Y, T0, nt, dt, dx, dy, alpha, beta):
+    Returns
+    -------
+    G : numpy.ndarray
+        2D array for heat generated on the powder bed.
+
+    """
+
+    nx, ny = len(X), len(Y)
+    ds = v*dt*n
+    Z = numpy.sqrt((X-(Lx/2))**2 + (Y-((Ly/2)+ds))**2) - .025
+    G = numpy.zeros((nx,ny))
+    mask = numpy.where(Z <= 0)
+    G[mask] = g
+
+    return G
+
+def ftcs(X, Y, v, g, T0, nt, dt, dx, dy, alpha, beta):
     """
     Computes and returns the temperature distribution
     after a given number of time steps.
@@ -51,6 +84,14 @@ def ftcs(X, Y, T0, nt, dt, dx, dy, alpha, beta):
     
     Parameters
     ----------
+    X  : 2D array
+        From numpy.meshgrid(x,y)
+    Y  : 2D array
+        From numpy.meshgrid(x,y)
+    v  : float
+        scan speed (mm/s)
+    g  : float
+        Volumetric heat generation (W/mm^3)
     T0 : numpy.ndarray
         The initial temperature distribution as a 2D array of floats.
     nt : integer
@@ -69,13 +110,19 @@ def ftcs(X, Y, T0, nt, dt, dx, dy, alpha, beta):
     sigma_x = alpha*dt / dx**2
     sigma_y = alpha*dt / dy**2
     
-    T = T0.copy()
+    T = numpy.copy(T0)
+    T_hist = []
     ny, nx = T.shape
     I, J = int(nx/2), int(ny/2)
     for n in range(nt):
-        T[1:-1,1:-1] = (T[1:-1,1:-1] +
-                        sigma_x * (T[1:-1,2:] - 2.0 * T[1:-1,1:-1] + T[1:-1,:-2]) +
-                        sigma_y * (T[2:,1:-1] - 2.0 * T[1:-1,1:-1] + T[:-2,1:-1])+ 
+        Tn = numpy.copy(T)
+        G = laser_scan(X, Y, v, g, n, dt)
+        if n > 500:
+            G = numpy.zeros((nx,ny))
+
+        T[1:-1,1:-1] = (Tn[1:-1,1:-1] +
+                        sigma_x * (Tn[1:-1,2:] - 2.0 * Tn[1:-1,1:-1] + Tn[1:-1,:-2]) +
+                        sigma_y * (Tn[2:,1:-1] - 2.0 * Tn[1:-1,1:-1] + Tn[:-2,1:-1])+
                         dt*beta*G[1:-1,1:-1])
         # Apply Neumann conditions on the boundaries
         T[-1,:] = T[-2,:]
@@ -87,17 +134,19 @@ def ftcs(X, Y, T0, nt, dt, dx, dy, alpha, beta):
 #             break
 #         print('[time step {}] Center at T={:.2f} at t={:.2f} s'
 #               .format(n+1,T[J,I], (n+1))*dt)
-        
-    return T
+        T_hist.append(T)
 
+    return T, T_hist
 
 def main():
+
     # Stability condition sigma
     sigma = 0.25
     dt = sigma * min(dx,dy)**2 / D
     nt = 5
     print('Total Time: {}'.format(nt*dt))
-    
+    print('Time step sie: {}'.format(dt))
+
     # Set initial temperature
     T0 = 20.0 * numpy.ones((ny,nx))
     
@@ -105,7 +154,7 @@ def main():
     G = numpy.zeros((nx,ny))
     g = generation(P,d,t)
     X, Y = numpy.meshgrid(x,y)
-    
+
     # Center
     # Z = (X - (Lx/2))**2 + (Y - (Ly/2))**2 - .025**2
     # Start laser at origin
@@ -113,20 +162,19 @@ def main():
     # Bottom Center
     Z = (X-(Lx/2))**2 + Y**2 - .025**2
     v = 500 #mm/s
-    # movement
-    ds = v*dt
-    
     pyplot.figure()
-    contf = pyplot.contourf(x,y,Z)
+    contf = pyplot.contourf(X,Y,Z)
     cbar = pyplot.colorbar(contf)
     
     mask = numpy.where(Z <= 0)
     G[mask] = g
-    
-    T = ftcs(T0,nt,dt,dx,dy,D,E,G)
-    
-    
-    
+    pyplot.figure()
+    pyplot.contourf(X,Y,G)
+
+    T, T_hist = ftcs(X, Y, v, g, T0, nt, dt, dx, dy, D, E)
+    print(T[int(nx/2), int(ny/2)])
+
+
     
     pyplot.figure(figsize=(6.0,6.0))
     pyplot.xlabel('x [mm]')
